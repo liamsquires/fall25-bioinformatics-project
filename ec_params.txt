@@ -1,0 +1,11 @@
+-p pipe_dir=ec-dtu-pipe
+-p python=python
+-p salmon=salmon
+-p salmon_index=salmon_index
+-p txome=data/Drosophila_melanogaster.BDGP6.cdna.all.fa.gz
+-p bmart_dset=dmelanogaster_gene_ensembl
+-p sample_regex=Dm
+-p group=Dm.4,Dm.5
+-p fastqFormat=%_sample_%_subsampled_*.fq.gz
+-p cores=8
+-p time=time

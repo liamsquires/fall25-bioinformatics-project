@@ -1,1 +1,5 @@
 .venv
+data/
+salmon*
+*bpipe*
+etc-dtu-pipe
