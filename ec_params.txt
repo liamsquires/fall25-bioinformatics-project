@@ -9,3 +9,6 @@
 -p fastqFormat=%_sample_%_subsampled_*.fq.gz
 -p cores=8
 -p time=time
+-p skipQuant=false
+-p tx_ref=
+-p tx_lookup=
