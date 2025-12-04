@@ -1,0 +1,6 @@
+pandoc*
+data/
+cache/
+Love2019*
+ref/soneson*
+.RData

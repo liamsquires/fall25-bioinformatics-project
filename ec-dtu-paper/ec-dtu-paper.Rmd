@@ -1,0 +1,664 @@
+---
+title: "Using equivalence class counts for fast and accurate testing of differential transcript usage"
+author:
+- Marek Cmero^1
+- Nadia Davidson^1,2†^
+- Alicia Oshlack^1,2†^*
+output:
+  html_document:
+    df_print: paged
+---
+
+^1^ Murdoch Chidren's Research Institute, Melbourne, Victoria, Australia
+^2^ School of Biosciences, Faculty of Science, University of Melbourne,
+Melbourne, Victoria, Australia
+
+^†^ These authors contributed equally in supervision of this work.
+
+\* Corresponding author
+
+E-mail: alicia.oshlack@mcri.edu.au
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(autodep        = TRUE,
+                      cache          = TRUE,
+                      cache.path     = "cache/",
+                      cache.comments = TRUE,
+                      echo           = FALSE,
+                      error          = FALSE,
+                      fig.path       = "figures/",
+                      fig.width      = 18,
+                      fig.height     = 12,
+                      dev            = c('png', 'pdf'),
+                      message        = FALSE,
+                      warning        = FALSE)
+```
+
+
+```{r libraries}
+# plotting
+library(ggplot2)
+library(gridExtra)
+# library(UpSetR)
+library(VennDiagram)
+library(RColorBrewer)
+
+# DE/DTU
+library(edgeR)
+library(DEXSeq)
+library(DRIMSeq)
+library(tximport)
+
+# utils
+library(data.table)
+library(dplyr)
+library(readr)
+```
+
+
+```{r source}
+source('R/load_data.R')
+source('R/dtu.R')
+source('R/util.R')
+source('R/plotting.R')
+```
+
+
+```{r options}
+options(stringsAsFactors = FALSE)
+
+# globals
+thresholds <- c(0.01, 0.05, 0.1)
+cutoff <- 0.05
+```
+
+
+```{r load}
+# lookup tables to convert salmon transcript IDs to ensembl reference
+dm_lookup <- 'ref/drosophila_transcript_id_lookup.txt.gz'
+# hs_lookup <- 'ref/hsapiens_transcript_id_lookup.txt.gz'
+# bm_lookup <- 'ref/mm9_tx_lookup.txt.gz'
+
+# ensembl reference to attach gene IDs to trascript IDs
+dm_ref <- 'ref/drosophila_transcript_reference.txt.gz'
+# hs_ref <- 'ref/hsapiens_transcript_reference.txt.gz'
+# bm_ref <- 'ref/mm9_transcript_reference.txt.gz'
+
+# load EC data from complete matrices
+dm_ec <- load_ec_data('data/drosophila/ec_counts/drosophila_ec_matrix.txt.gz', tx_lookup=dm_lookup, reference=dm_ref)
+# hs_ec <- load_ec_data('data/hsapiens/ec_counts/hsapiens_ec_matrix.txt.gz', tx_lookup=hs_lookup, reference=hs_ref)
+# bm_ec <- load_ec_data('data/bottomly/ec_counts/bottomly_ec_counts.txt.gz', tx_lookup=bm_lookup, reference=bm_ref)
+
+# load transcript data from salmon quant.sf files
+dm_tx <- load_tx_data('data/drosophila/tx_counts/', tx_lookup=dm_lookup, reference=dm_ref)
+# hs_tx <- load_tx_data('data/hsapiens/tx_counts/', tx_lookup=hs_lookup, reference=hs_ref)
+# bm_tx <- load_tx_data('data/bottomly/tx_counts/', tx_lookup=bm_lookup, reference=bm_ref)
+
+# load exon data from dexseq counts
+dm_ex <- load_ex_data('data/drosophila/exon_counts/', 'Dm')
+# hs_ex <- load_ex_data('data/hsapiens/exon_counts/', 'Hs')
+# bm_ex <- load_ex_data('data/bottomly/exon_counts/', 'SRR')
+
+# add species name
+# hs_ec$species <- 'hsapiens'; hs_tx$species <- 'hsapiens'; hs_ex$species <- 'hsapiens'
+dm_ec$species <- 'drosophila'; dm_tx$species <- 'drosophila'; dm_ex$species <- 'drosophila'
+# bm_ec$species <- 'bottomly'; bm_tx$species <- 'bottomly'; bm_ex$species <- 'bottomly'
+
+# load bottomly group information
+# NOTE: download the SraRunTabler from https://www.ncbi.nlm.nih.gov/Traces/study/ for SRP004777
+# run_tbl <- read.delim('ref/SraRunTable.txt')
+# bm_samples <- data.frame(sample=run_tbl$Run,
+#                     type=sapply(run_tbl$Sample_Name, function(x){strsplit(x, '_')[[1]][1]}))
+# bm_group1 <- bm_samples$sample[bm_samples$type=='B6']
+# bm_group2 <- bm_samples$sample[bm_samples$type=='D2']
+```
+
+# Figure 2
+
+The number of transcripts, equivalence classes and exons per gene (top), where each feature has at least one associated read. The density of the variance of counts over the mean (bottom) for each feature (calculated per condition).
+
+```{r Figure2, fig.width=15, fig.height=10}
+# get count summaries by feature type
+# feat_summary <- count_features(hs_ec, hs_tx, hs_ex, 'hsapiens', 'Hs')
+feat_summary <- count_features(dm_ec, dm_tx, dm_ex, 'drosophila', 'Dm')
+# feat_summary <- rbind(feat_summary, count_features(bm_ec, bm_tx, bm_ex, 'bottomly', 'SRR'))
+
+datasets <- c('drosophila')
+features <- c('Transcripts', 'Equivalence classes', 'Exons')
+feat_summary$species <- factor(feat_summary$species, levels=datasets)
+feat_summary$feature <- factor(feat_summary$feature, levels=features)
+
+# calculate feature variances across groups
+feat_var <- calculate_feature_variance(dm_ec, 'Dm')
+feat_var <- rbind(feat_var,
+                  calculate_feature_variance(dm_tx, 'Dm', feature='Transcripts'))
+feat_var <- rbind(feat_var,
+                  calculate_feature_variance(dm_ex, 'Dm', feature='Exons'))
+# feat_var <- rbind(feat_var,
+#                   calculate_feature_variance(hs_ec, 'Hs', species='hsapiens'))
+# feat_var <- rbind(feat_var,
+#                   calculate_feature_variance(hs_tx, 'Hs', species='hsapiens', feature='Transcripts'))
+# feat_var <- rbind(feat_var,
+#                   calculate_feature_variance(hs_ex, 'Hs', species='hsapiens', feature='Exons'))
+# feat_var <- rbind(feat_var,
+#                   calculate_feature_variance(bm_ec, 'SRR', species='bottomly',
+#                                              group1=bm_group1, group2=bm_group2))
+# feat_var <- rbind(feat_var,
+#                   calculate_feature_variance(bm_tx, 'SRR', species='bottomly', feature='Transcripts',
+#                                              group1=bm_group1, group2=bm_group2))
+# feat_var <- rbind(feat_var,
+#                   calculate_feature_variance(bm_ex, 'SRR', species='bottomly', feature='Exons',
+#                                              group1=bm_group1, group2=bm_group2))
+
+feat_var$species <- factor(feat_var$species, levels=c('drosophila'))
+
+# show mean log2 var/means
+print(data.table(feat_var)[, mean(log2(variance / mean)), by=c('data','species')])
+
+# plot results
+cols <- c('Transcripts' = '#a6cee3',
+          'Equivalence classes' = '#1f78b4',
+          'Exons' = '#b2df8a')
+f2a <- ggplot(feat_summary, aes(feature, V1)) +
+            geom_boxplot(alpha = 0.6) +
+            theme_bw() +
+            theme(legend.position = 'none',
+                  text = element_text(size = 20)) +
+            scale_y_log10(limits=c(1, 1000)) +
+            ylab('number per gene') +
+            xlab('') +
+            facet_wrap(~species) +
+            scale_x_discrete(labels = c('Transcripts', 'ECs', 'Exons'))
+
+f2b <- ggplot(feat_var, aes(log2(variance / mean), colour = data)) +
+            geom_density(adjust=3) +
+            theme_bw() +
+            theme(legend.title = element_blank(),
+                  legend.position = 'bottom',
+                  text = element_text(size = 20)) +
+            scale_colour_manual(values = cols) +
+            facet_grid(~species)
+
+grid.arrange(f2a, f2b, nrow=2)
+```
+
+# Supplementary Figure 1
+
+```{r run-diffsplice}
+group <- rep(c('c1','c2'), each=3)
+dm_ec_results <- run_diffsplice(dm_ec, group, 'Dm', feature='ec')
+dm_tx_results <- run_diffsplice(dm_tx, group, 'Dm', feature='tx')
+dm_ex_results <- run_diffsplice(dm_ex, group, 'Dm', feature='ex')
+
+# hs_ec_results <- run_diffsplice(hs_ec, group, 'Hs', feature='ec')
+# hs_tx_results <- run_diffsplice(hs_tx, group, 'Hs', feature='tx')
+# hs_ex_results <- run_diffsplice(hs_ex, group, 'Hs', feature='ex')
+
+# sample_order <- colnames(bm_ec[,.SD,.SDcols = names(bm_ec) %like% 'SRR'])
+# group <- as.numeric(sample_order %in% bm_group1)
+# bm_ec_results <- run_diffsplice(bm_ec, group, 'SRR', feature='ec')
+# bm_tx_results <- run_diffsplice(bm_tx, group, 'SRR', feature='tx')
+# bm_ex_results <- run_diffsplice(bm_ex, group, 'SRR', feature='ex')
+```
+
+Shows the dispersion versus mean normalised counts for all features across the three data sets, generated using DEXSeq's `plotDispEsts` function. As described in Love et al.[1], the red line shows the fitted dispersion-mean trend, the blue dots indicate the shrunken dispersion estimates, and the blue circles indicate outliers not shrunk towards the prior.
+
+```{r SupplementaryFigure1, fig.width=15, fig.height=15, dev='png', pointsize=24}
+par(mfrow=c(1,3))
+plotDispEsts(dm_tx_results[['dexseq_object']], xlim=c(1,5e5)); title('Drosophila Transcripts')
+plotDispEsts(dm_ec_results[['dexseq_object']], xlim=c(1,5e5)); title('Drosophila Equivalence classes')
+plotDispEsts(dm_ex_results[['dexseq_object']], xlim=c(1,5e5)); title('Drosophila Exons')
+# plotDispEsts(hs_tx_results[['dexseq_object']], xlim=c(1,5e5)); title('Hsapiens Transcripts')
+# plotDispEsts(hs_ec_results[['dexseq_object']], xlim=c(1,5e5)); title('Hsapiens Equivalence classes')
+# plotDispEsts(hs_ex_results[['dexseq_object']], xlim=c(1,5e5)); title('Hsapiens Exons')
+# plotDispEsts(bm_tx_results[['dexseq_object']], xlim=c(1,5e5)); title('Bottomly Transcripts')
+# plotDispEsts(bm_ec_results[['dexseq_object']], xlim=c(1,5e5)); title('Bottomly Equivalence classes')
+# plotDispEsts(bm_ex_results[['dexseq_object']], xlim=c(1,5e5)); title('Bottomly Exons')
+```
+
+
+```{r Figure3a}
+# NOTE: obtain truth data from http://imlspenticton.uzh.ch/robinson_lab/splicing_comparison/
+
+results <- NULL
+results[['dexseq_equivalence_class']] <- dm_ec_results[['gene_FDR']]
+results[['dexseq_transcripts_salmon']] <- dm_tx_results[['gene_FDR']]
+results[['dexseq_exons']] <- dm_ex_results[['gene_FDR']]
+
+truth <- read.delim('ref/soneson_results/truth_drosophila_non_null_missing20_ms.txt')
+test <- read.delim('ref/soneson_results/merged_results_all_drosophila.txt')
+test_reduced <- test[,grep('gene|miso', colnames(test))]
+
+res <- get_fdr_tpr_stats(test_reduced, truth, results, thresholds, 'drosophila')
+
+# results <- NULL
+# results[['dexseq_equivalence_class']] <- hs_ec_results[['gene_FDR']]
+# results[['dexseq_transcripts_salmon']] <- hs_tx_results[['gene_FDR']]
+# results[['dexseq_exons']] <- hs_ex_results[['gene_FDR']]
+#
+# truth <- read.delim('ref/soneson_results/truth_human_non_null_missing20_ms.txt')
+# test <- read.delim('ref/soneson_results/merged_results_all_human.txt')
+# test_reduced <- test[,grep('gene|miso', colnames(test))]
+#
+# res <- rbind(res,
+#              get_fdr_tpr_stats(test_reduced, truth, results, thresholds, 'hsapiens'))
+
+res$method <- gsub('.adjP', '', res$method)
+res$method <- gsub('dexseq_', '', res$method)
+res$method[res$method=='exons'] <- 'dexseq_count_exons'
+
+cols <- c('transcripts_salmon' = '#a6cee3',
+          'equivalence_class' = '#1f78b4',
+          'dexseq_count_exons' = '#b2df8a',
+          'miso_assignable' = '#33a02c')
+
+f3a <- ggplot(res, aes(FDR, TPR, group=method, colour=method)) +
+        geom_line(size=0.5) +
+        geom_point(size=2, shape=1, stroke=1) + theme_bw() + ylim(0,1) + xlim(0,1) +
+        geom_vline(xintercept = thresholds,
+                   colour='grey',
+                   linetype='dotted') + facet_wrap(~species) +
+        theme(legend.position = 'bottom',
+              legend.title = element_blank(),
+              text = element_text(size = 18)) +
+        scale_color_manual(values = cols)
+```
+
+# # Supplementary Figure 2
+#
+# Shows the significant genes (FDR < 0.05) shared between the methods, obtained from DEXSeq run on the full Bottomly et al.[2] data set for each feature.
+#
+# ```{r SupplementaryFigure2, fig.width=6, fig.height=6}
+# genes_ec <- distinct(bm_ec[,.SD,.SDcols = names(bm_ec) %in% c('gene_id', 'ec_names')])
+# genes_tx <- distinct(bm_tx[,.SD,.SDcols = names(bm_tx) %in% c('gene_id', 'ensembl_id')])
+# genes_ex <- distinct(bm_ex[,.SD,.SDcols = names(bm_ex) %in% c('gene_id', 'exon_id')])
+# colnames(genes_ec)[1] <- 'feature_id'
+# colnames(genes_tx)[1] <- 'feature_id'
+# colnames(genes_ex)[1] <- 'feature_id'
+#
+# counts_ec <- distinct(bm_ec[,.SD,.SDcols = names(bm_ec) %like% 'SRR|gene_id|ec_names'])
+# counts_tx <- distinct(bm_tx[,.SD,.SDcols = names(bm_tx) %like% 'SRR|gene_id|ensembl_id'])
+# counts_ex <- distinct(bm_ex[,.SD,.SDcols = names(bm_ex) %like% 'SRR|gene_id|exon_id'])
+#
+# bm_qec <- bm_ec_results[['gene_FDR']]
+# bm_qtx <- bm_tx_results[['gene_FDR']]
+# bm_qex <- bm_ex_results[['gene_FDR']]
+#
+# true_ec <- unique(bm_qec[bm_qec$FDR<cutoff,]$gene)
+# true_tx <- unique(bm_qtx[bm_qtx$FDR<cutoff,]$gene)
+# true_ex <- unique(bm_qex[bm_qex$FDR<cutoff,]$gene)
+#
+# dt_truth <- NULL
+# dt_truth[['Equivalence classes']] <- true_ec
+# dt_truth[['Transcripts']] <- true_tx
+# dt_truth[['Exons']] <- true_ex
+#
+# # upset(fromList(dt_truth), text.scale = 2)
+#
+# cols <- brewer.pal(3, 'Set3')
+# venn.plot <- venn.diagram(dt_truth,
+#                           NULL,
+#                           fill=cols,
+#                           alpha=c(0.5,0.5,0.5),
+#                           cex = 2,
+#                           cat.fontface=1,
+#                           category.names=names(dt_truth),
+#                           main="", scaled=FALSE)
+# grid.draw(venn.plot)
+# ```
+
+# # Figure 3
+#
+# ```{r run-bottomly}
+# # Bottomly data subset testing
+# N = 3
+# iters = 20
+# res_ec <- NULL
+# res_tx <- NULL
+# res_ex <- NULL
+#
+# # seeds used for paper analysis
+# seeds <- c(7601, 6989, 3551, 2774, 1389,
+#            1471, 6763, 5167, 3342, 1642,
+#            6589, 9151, 4694, 1917, 4324,
+#            5513, 2414, 1424, 6536, 7624)
+#
+# all_comps <- NULL
+# for(i in 1:iters) {
+#     set.seed(seeds[i])
+#     comp <- get_random_comp(bm_samples, N)
+#     all_comps <- rbind(all_comps, data.frame(comp, iter=i))
+#
+#     # equivalence classes
+#     counts <- data.frame(counts_ec[,.SD,.SDcols = names(counts_ec) %in% comp$sample])
+#     res_ec[[i]] <- run_dexseq(counts, genes_ec, comp$type, 0, 0)[['gene_FDR']]; gc()
+#
+#     # transcripts
+#     counts <- data.frame(counts_tx[,.SD,.SDcols = names(counts_tx) %in% comp$sample])
+#     counts <- sapply(counts, round)
+#     res_tx[[i]] <- run_dexseq(counts, genes_tx, comp$type, 0, 0)[['gene_FDR']]; gc()
+#
+#     # exons
+#     counts <- data.frame(counts_ex[,.SD,.SDcols = names(counts_ex) %in% comp$sample])
+#     res_ex[[i]] <- run_dexseq(counts, genes_ex, comp$type, 0, 0)[['gene_FDR']]; gc()
+# }
+# print('Sample usage')
+# print(table(all_comps$sample))
+# ```
+#
+# (top) The equivalence class method compared to other state-of-the-art methods on simulated data described in Soneson et al.[3]. The circles show the observed true positive rate (TPR) versus false discovery rate (FDR) at three nominal FDR cut-offs (0.01, 0.05 and 0.1) for each method. The dotted lines indicate the FDR at the nominal cut-off values of 0.01, 0.05 and 0,1 (i.e. if the FDR is adequately controlled, the three circles should match up with these lines). (bottom) The ability of the equivalence class, transcript and exon-based methods to recreate the results of a full comparison (10 vs. 11) of the Bottomly data, using only a (randomly selected) subset of samples (3 vs. 3) across 20 iterations using FDR < 0.05 (FDR = 0.05 is indicated by the dotted line). The union of all genes called as significant across all three methods is used to calculate the FDR, and the intersect (genes called by all three methods) is used for the TPR. Full results (union, intersect and each method's individual truth set) are shown in Supplementary Figure 3, which also shows lines connecting the results from each iteration.
+#
+# ```{r Figure3, fig.width=12, fig.height=10.5}
+# # f3a cols
+# cols <- c('transcripts_salmon' = '#a6cee3',
+#           'equivalence_class' = '#1f78b4',
+#           'dexseq_count_exons' = '#b2df8a',
+#           'miso_assignable' = '#33a02c')
+# # f3b-c cols
+# rcols <- c('Transcripts' = '#a6cee3',
+#              'Equivalence classes' = '#1f78b4',
+#              'Exons' = '#b2df8a')
+# results <- get_subset_tests_results(res_ec, res_tx, res_ex, true_ec, true_tx, true_ex)
+# f3b <- plot_bottomly_boxplot(results, rcols, title='FDR (union)', toplot='FDR', hline=cutoff)
+# f3c <- plot_bottomly_boxplot(results, rcols, title='Recall fraction (intersect)', toplot='TPR')
+#
+# grid.arrange(f3a, f3b, f3c, layout_matrix=rbind(c(1,1), c(2,3)), nrow=2)
+# ```
+
+# # Supplementary Figure 3
+#
+# Shows the ability of the three methods to recreate the results of a full comparison (10 vs. 11) of the Bottomly et al.[2] data using random subsets of 3 vs. 3 samples across 20 iterations using FDR < 0.05 (FDR = 0.05 is indicated by the dotted line). The lines between the plots join data points from the same iteration. Each row uses a different `truth' set: union is the set of genes called significant by any method, intersect is the set of genes called significant by all methods, and individual is the set of genes called significant by that method only.
+#
+# ```{r SupplementaryFigure3, fig.width=12, fig.height=15.75}
+# results <- get_subset_tests_results(res_ec, res_tx, res_ex,
+#                                     true_ec, true_tx, true_ex,
+#                                     method = c(FDR='union', TPR='union'))
+# s3a <- plot_bottomly_boxplot(results, rcols, title='FDR (union)', toplot='FDR', hline=cutoff, lines=T)
+# s3b <- plot_bottomly_boxplot(results, rcols, title='Recall fraction (union)', toplot='TPR', lines=T)
+#
+# results <- get_subset_tests_results(res_ec, res_tx, res_ex,
+#                                     true_ec, true_tx, true_ex,
+#                                     method = c(FDR='intersect', TPR='intersect'))
+# s3c <- plot_bottomly_boxplot(results, rcols, title='FDR (intersect)', toplot='FDR', hline=cutoff, lines=T)
+# s3d <- plot_bottomly_boxplot(results, rcols, title='Recall fraction (intersect)', toplot='TPR', lines=T)
+#
+# results <- get_subset_tests_results(res_ec, res_tx, res_ex,
+#                                     true_ec, true_tx, true_ex,
+#                                     method = c(FDR='individual', TPR='individual'))
+# s3e <- plot_bottomly_boxplot(results, rcols, title='FDR (individual)', toplot='FDR', hline=cutoff, lines=T)
+# s3f <- plot_bottomly_boxplot(results, rcols, title='Recall fraction (individual)', toplot='TPR', lines=T)
+#
+# grid.arrange(s3a, s3b,
+#              s3c, s3d,
+#              s3e, s3f, ncol=2)
+# ```
+
+# # Supplementary Figure 4
+#
+# The number of false positives versus each gene's rank (by FDR) for one iteration (3 vs. 3) of the Bottomly[2] subset tests for the top 500 genes. The union of significant genes across all methods was used as the truth set.
+#
+# ```{r SupplementaryFigure4, fig.width=10.5, fig.height=7.5}
+# pick_iter = 1
+# true_dtu <- union(union(true_ec, true_tx), true_ex)
+# false_dtu <- union(union(genes_ec$gene_id, genes_tx$gene_id), genes_ex$gene_id)
+# false_dtu <- false_dtu[!false_dtu%in%true_dtu]
+#
+# rp <- get_rank_orders(res_ec, false_dtu, 'Equivalence classes', pick_iter = pick_iter)
+# rp <- rbind(rp, get_rank_orders(res_tx, false_dtu, 'Transcripts', pick_iter = pick_iter))
+# rp <- rbind(rp, get_rank_orders(res_ex, false_dtu, 'Exons', pick_iter = pick_iter))
+#
+# ggplot(rp, aes(gene_rank, false_positives, colour = feature)) +
+#     geom_line() +
+#     theme_bw() +
+#     xlim(0,500) +
+#     ylim(0,500) +
+#     scale_color_manual(values = rcols) +
+#     ylab('False positives') +
+#     xlab('Gene rank') +
+#     theme(legend.title = element_blank(),
+#           text = element_text(size = 18))
+# ```
+
+# # Supplementary Figure 5
+#
+# ```{r run-kallisto}
+# # load in kallisto data
+# bm_kec <- load_ec_data('data/bottomly/ec_counts/bottomly_kallisto_ec_counts.txt.gz', NA, bm_ref, salmon=F)
+# counts_kec <- distinct(bm_kec[,.SD,.SDcols = names(bm_kec) %like% 'SRR|gene_id|ec_names'])
+# genes_kec <- distinct(bm_kec[,.SD,.SDcols = names(bm_kec) %in% c('gene_id', 'ec_names')])
+# colnames(genes_kec)[1] <- 'feature_id'
+#
+# # run diffsplice
+# sample_order <- colnames(bm_kec[,.SD,.SDcols = names(bm_kec) %like% 'SRR'])
+# group <- as.numeric(sample_order %in% bm_group1)
+# bm_kec_results <- run_diffsplice(bm_kec, group, 'SRR', feature='ec')
+#
+# # run kallisto iteration tests on Bottomly data (using same seeds as before)
+# res_kec <- NULL
+# for(i in 1:iters) {
+#     set.seed(seeds[i])
+#     comp <- get_random_comp(bm_samples, N)
+#
+#     counts <- data.frame(counts_kec[,.SD,.SDcols = names(counts_kec) %in% comp$sample])
+#     res_kec[[i]] <- run_dexseq(counts, genes_kec, comp$type, 0, 0)[['gene_FDR']]; gc()
+# }
+# ```
+#
+# Kallisto[4] versus Salmon's[5] performance on the Bottomly[2] subset testing experiments, using each method's significant genes from the full (10 vs. 11) run as the truth set for calculating both metrics.
+#
+# ```{r SupplementaryFigure5, fig.width=12, fig.height=5.25}
+# # calculate kallisto results
+# kal_bm_qec <- bm_kec_results[['gene_FDR']]
+# true_kec <- unique(kal_bm_qec[kal_bm_qec$FDR<cutoff,]$gene)
+# kal_res <- get_subset_tests_results(res_kec, res_tx, res_ex,
+#                                     true_kec, true_tx, true_ex,
+#                                     method = c(FDR='individual', TPR='individual'))
+# kal_res <- kal_res[kal_res$feature %in% 'Equivalence classes', ]
+#
+# # use last salmon results for comparison (individual FDR/TPR calculation)
+# sal_res <- results[results$feature %in% 'Equivalence classes', ]
+#
+# # set up results for plotting
+# kal_res <- melt(kal_res[,c('iter', 'FDR', 'TPR')], id.vars='iter', value.name='kallisto')
+# sal_res <- melt(sal_res[,c('iter', 'FDR', 'TPR')], id.vars='iter', value.name='salmon')
+# res <- merge(sal_res, kal_res, by=c('iter', 'variable'))
+#
+# ggplot(res, aes(salmon, kallisto)) +
+#     geom_abline(slope = 1, intercept = 0, colour = 'grey') +
+#     geom_point() +
+#     theme_bw() +
+#     xlim(0,1) + ylim(0,1) +
+#     facet_wrap(~variable)
+# ```
+
+# Supplementary Figure 6
+
+Performance of ECC, transcript count (using Salmon) and exon count (using DEXSeq-count) methods on the Soneson[3] data with and without DRIMSeq[6] filtering (see paper methods for full filtering criteria).
+
+```{r SupplementaryFigure6, fig.width=12, fig.height=6}
+group <- rep(c('c1','c2'), each=3)
+dm_ec_filt <- run_diffsplice(dm_ec, group, 'Dm', feature='ec', simple_filter=TRUE)
+dm_tx_filt <- run_diffsplice(dm_tx, group, 'Dm', feature='tx', simple_filter=TRUE)
+dm_ex_filt <- run_diffsplice(dm_ex, group, 'Dm', feature='ex', simple_filter=TRUE)
+
+# hs_ec_filt <- run_diffsplice(hs_ec, group, 'Hs', feature='ec', simple_filter=TRUE)
+# hs_tx_filt <- run_diffsplice(hs_tx, group, 'Hs', feature='tx', simple_filter=TRUE)
+# hs_ex_filt <- run_diffsplice(hs_ex, group, 'Hs', feature='ex', simple_filter=TRUE)
+
+results <- NULL
+results[['equivalence_class']] <- dm_ec_results[['gene_FDR']]
+results[['transcripts_salmon']] <- dm_tx_results[['gene_FDR']]
+results[['dexseq_count_exons']] <- dm_ex_results[['gene_FDR']]
+results[['equivalence_class_filt']] <- dm_ec_filt[['gene_FDR']]
+results[['transcripts_salmon_filt']] <- dm_tx_filt[['gene_FDR']]
+results[['dexseq_count_exons_filt']] <- dm_ex_filt[['gene_FDR']]
+
+truth <- read.delim('ref/soneson_results/truth_drosophila_non_null_missing20_ms.txt')
+test <- read.delim('ref/soneson_results/merged_results_all_drosophila.txt')
+res <- get_fdr_tpr_stats(test, truth, results, thresholds, 'drosophila', filt_genes=TRUE)
+
+# results <- NULL
+# results[['equivalence_class']] <- hs_ec_results[['gene_FDR']]
+# results[['transcripts_salmon']] <- hs_tx_results[['gene_FDR']]
+# results[['dexseq_count_exons']] <- hs_ex_results[['gene_FDR']]
+# results[['equivalence_class_filt']] <- hs_ec_filt[['gene_FDR']]
+# results[['transcripts_salmon_filt']] <- hs_tx_filt[['gene_FDR']]
+# results[['dexseq_count_exons_filt']] <- hs_ex_filt[['gene_FDR']]
+#
+# truth <- read.delim('ref/soneson_results/truth_human_non_null_missing20_ms.txt')
+# test <- read.delim('ref/soneson_results/merged_results_all_human.txt')
+# res <- rbind(res,
+#              get_fdr_tpr_stats(test, truth, results, thresholds, 'hsapiens', filt_genes=TRUE))
+res <- res[res$method%like%'salmon|equiv|exon',]
+
+cols <- c('transcripts_salmon' = '#000000',
+          'transcripts_salmon_filt' = '#E69F00',
+          'equivalence_class' = '#56B4E9',
+          'equivalence_class_filt' = '#0072B2',
+          'dexseq_count_exons' = '#F0E442',
+          'dexseq_count_exons_filt' = '#CC79A7')
+
+res$method <- factor(res$method, levels=names(cols))
+ggplot(res, aes(FDR, TPR, group=method, colour=method)) +
+        geom_line(size=0.5) +
+        geom_point(size=2, shape=1, stroke=1) + theme_bw() + xlim(0, 0.6) + ylim(0.5, 0.8) +
+        geom_vline(xintercept = thresholds,
+                   colour='grey',
+                   linetype='dotted') + facet_wrap(~species) +
+        theme(legend.position = 'bottom',
+              legend.title = element_blank(),
+              text = element_text(size = 18)) +
+        scale_color_manual(values = cols)
+```
+
+# # Supplementary Figure 7
+#
+# An example EC usage plot for a single gene from the Soneson[3] hsapiens DECU results. Log EC usage is shown across each equivalence class for both conditions. Yellow blocks indicate significant ECs. As ECs do not correspond easily to genomic locations, no special ordering is applied the ECs. In the given example, transcripts mapping to each significant EC can be obtained. The significant ec142580 corresponds to a single transcript (ENST00000443443), indicating that interpretation can be straight-forward if the EC is associated with a single transcript. See Section 6.4 of the EC DTU vignette (https://github.com/Oshlack/ec-dtu-paper/wiki/Vignette) for how to run the plotting code.
+#
+# ```{r SupplementaryFigure7, fig.width=12, fig.height=6}
+# # create EC/gene_id lookup table
+# lookup <- distinct(hs_ec[,c('ensembl_id', 'ec_names', 'gene_id')])
+# colnames(lookup)[1] <- 'transcript'
+# lookup$id <- paste(lookup$gene_id, lookup$ec_names, sep=':')
+#
+# ecu <- plot_ec_usage(hs_ec_results$dexseq_results, 'ENSG00000004766', lookup)
+# ecu
+# ```
+
+# # Supplementary Table 2
+#
+# Average number of exons and transcripts per gene from the hg38 ensembl reference.
+#
+# ```{r SupplementaryTable2}
+# library(biomaRt)
+#
+# mart <- useMart('ENSEMBL_MART_ENSEMBL',
+#                 dataset='hsapiens_gene_ensembl')
+# ensg_attr <- c('external_gene_name',
+#                'ensembl_gene_id',
+#                'ensembl_transcript_id',
+#                'ensembl_exon_id',
+#                'chromosome_name',
+#                'exon_chrom_start',
+#                'exon_chrom_end')
+# ensg <- getBM(mart=mart,attributes=ensg_attr)
+#
+# by_exon <- data.table(ensg)[,length(unique(ensembl_exon_id)),by=c('ensembl_gene_id')]
+# by_tx <- data.table(ensg)[,length(unique(ensembl_transcript_id)),by=c('ensembl_gene_id')]
+#
+# ex_tx_stats <- data.frame(Feature = c('Exons', 'Transcript'),
+#                           Count = c(mean(by_exon$V1), mean(by_tx$V1)))
+# ex_tx_stats$Count <- round(ex_tx_stats$Count, 4)
+# print(ex_tx_stats)
+# ```
+
+# # Supplementary Figure 8
+#
+# ```{r run-love}
+# #NOTE: download the feature counts from https://doi.org/10.5281/zenodo.2644723
+# lv_ref <- 'ref/gencode_v28_transcript_reference.txt.gz'
+#
+# # load EC data from complete matrices
+# lv_ec <- load_ec_data('data/love/ec_counts/love_ec_matrix.txt.gz', reference=lv_ref)
+# lv_tx <- load_tx_data('data/love/tx_counts/', reference=lv_ref)
+# lv_ex <- load_ex_data('data/love/exon_counts/', 'sample')
+#
+# group <- rep('c1', 24)
+# group[grep('c02',colnames(lv_ec))] <- 'c2'
+# lv_ec <- run_diffsplice(lv_ec, group, 'sample', feature='ec')
+# lv_tx <- run_diffsplice(lv_tx, group, 'sample', feature='tx')
+# lv_ex <- run_diffsplice(lv_ex, group, 'sample', feature='ex')
+# ```
+#
+# Performance of ECC, transcript count (using Salmon) and exon count (using DEXSeq-count) methods on the Love et al.[7] data (12 vs. 12 samples). The points show nominal FDR cutoffs of 0.01, 0.05 and 0.1.
+#
+# ```{r SupplementaryFigure8, fig.width=6, fig.height=6}
+# # install the rnaseqDTU package (https://github.com/mikelove/rnaseqDTU)
+# library(rnaseqDTU)
+#
+# results <- NULL
+# results[['equivalence_class']] <- lv_ec[['gene_FDR']]
+# results[['transcripts_salmon']] <- lv_tx[['gene_FDR']]
+# results[['dexseq_count_exons']] <- lv_ex[['gene_FDR']]
+#
+# dtu_truth_genes <- union(dtu.genes, dte.genes)
+#
+# lookup <- read.delim(lv_ref, header=F, sep=' ')
+# colnames(lookup) <- c('gene', 'transcript', 'exon', 'symbol','exon_id')
+#
+# txinfo <- read.delim('ref/sim_tx_info.txt.gz')
+# colnames(txinfo)[1] <- 'transcript'
+# txinfo <- inner_join(txinfo, lookup, by='transcript')
+# txinfo$ds_status <- txinfo$gene %in% dtu_truth_genes
+#
+# truth <- data.frame(gene=lookup$gene, ds_status=as.numeric(lookup$gene %in% dtu_truth_genes))
+# tested_genes <- rownames(results[[names(results)[1]]])
+# for(rname in names(results)[2:length(results)]) {
+#     rgenes <- rownames(results[[rname]])
+#     tested_genes <- intersect(tested_genes, rgenes)
+# }
+# truth <- truth[truth$gene%in%tested_genes,]
+#
+# res <- NULL
+# for(i in names(results)) {
+#     stats <- calculate_stats(thresholds, truth, results[[i]], gene_id = 'gene', fdr_id = 'FDR')
+#     fdrs <- stats[1,]; tprs <- stats[2,]
+#     res <- rbind(res, data.frame(method=i, FDR=fdrs, TPR=tprs, thresholds=thresholds))
+# }
+#
+# cols <- c('transcripts_salmon' = '#a6cee3',
+#           'equivalence_class' = '#1f78b4',
+#           'dexseq_count_exons' = '#b2df8a')
+# ggplot(res, aes(FDR, TPR, group=method, colour=method)) +
+#     geom_line(size=0.5) +
+#     geom_point(size=2, shape=1, stroke=1) + theme_bw() + ylim(0.6,0.8) + xlim(0,0.3) +
+#     geom_vline(xintercept = thresholds,
+#                colour='grey',
+#                linetype='dotted') +
+#     theme(legend.position = 'bottom',
+#           legend.title = element_blank(),
+#           text = element_text(size = 18)) +
+#     scale_colour_manual(values = cols)
+# ```
+
+# Session information
+
+```{r sess-info}
+options(width = 120); sessioninfo::session_info()
+```
+
+# References
+
+[1] Love, M. I., Huber, W., & Anders, S. (2014). Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. Genome Biology, 15(12), 1–21. https://doi.org/10.1186/s13059-014-0550-8
+
+[2] Bottomly, D., Walter, N. A. R., Hunter, J. E., Darakjian, P., Kawane, S., Buck, K. J., … Hitzemann, R. (2011). Evaluating gene expression in C57BL/6J and DBA/2J mouse striatum using RNA-Seq and microarrays. PLoS ONE, 6(3). https://doi.org/10.1371/journal.pone.0017820
+
+[3] Soneson, C., Matthes, K. L., Nowicka, M., Law, C. W., & Robinson, M. D. (2016). Isoform prefiltering improves performance of count-based methods for analysis of differential transcript usage. Genome Biology, 17(1), 1–15. https://doi.org/10.1186/s13059-015-0862-3
+
+[4] Bray, N. L., Pimentel, H., Melsted, P., & Pachter, L. (2016). Near-optimal probabilistic RNA-seq quantification. Nature Biotechnology, 34(5), 525–527. https://doi.org/10.1038/nbt.3519
+
+[5] Patro, R., Duggal, G., Love, M. I., Irizarry, R. A., & Kingsford, C. (2017). Salmon provides fast and bias-aware quantification of transcript expression. Nature Methods, 14(4), 021592. https://doi.org/10.1038/nmeth.4197
+
+[6] Nowicka, M., & Robinson, M. D. (2016). DRIMSeq: a Dirichlet-multinomial framework for multivariate count outcomes in genomics. F1000Research, 5(0), 1356. https://doi.org/10.12688/f1000research.8900.2
+
+[7] Love, M. I., Soneson, C., & Patro, R. (2018). Swimming downstream: statistical analysis of differential transcript usage following Salmon quantification. F1000Research, 7, 952. https://doi.org/10.12688/f1000research.15398.1
