@@ -7,8 +7,10 @@
 - typically done with exon-count data or transcript quantification estimates
 - transcript estimates come from ECs, so might as well just use ECs directly
 
-# Methods and Limitations
+# Methods
+### Procedures
 - completed their vignette and (hopefully) simulated their findings using the provided  ec-dtu-paper repo
+### Challenges
 - 
 
 # Results
