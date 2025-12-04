@@ -1,12 +1,15 @@
+# Abstract
+- purpose of the paper is to confirm the results of the other paper
+
 # Background
 - take inspiration from original paper's background
+- RNA-seq data can be used in DTU
+- typically done with exon-count data or transcript quantification estimates
+- transcript estimates come from ECs, so might as well just use ECs directly
+
+# Methods and Limitations
+- completed their vignette and (hopefully) simulated their findings using the provided  ec-dtu-paper repo
 - 
-
-# Abstract
-
-
-# Methods
-
 
 # Results
 
