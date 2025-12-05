@@ -5,11 +5,7 @@ The purpose of this report is to confirm the results of "Using equivalence class
 
 Looking for differential transcript usage (DTU) between samples is the most important task when analyzing differential gene expression from RNA sequencing data. This was typically done directly using estimated transcript abundances or exon counts, where using transcripts is quite fast, but has limited accuracy compared to using exon counts which gives higher accuracy, but is computationally expensive and slow [1]. Given this, the authors suggest using equivalence class counts (ECCs) as an alternative method for performing DTU. 
 
-*P2: Go into detail on how their method works*
-
-*P3: Talk about what they found and*
-
-*P4: Explain how we're confirming their results*
+The authors found that using ECCs directly for DTU was equally or more accurate than using exon counts, while being much faster. It is slower than using estimated transcript, but more accurate. The authors made a pipeline for performing DTU analysis. To confirm the authors' results, we ran their pipeline on their sample data, and also recreated the figures they used in their paper. In both cases, we followed Github repos prepared by the authors.
 
 # 3.0 Methods
 ### 3.1 Reproduction of Paper Figures
