@@ -1,5 +1,13 @@
 Helpful terms for understanding the paper.
 
+-**"differential EC usage"**
+
+Some ECs have significantly different usage between condition c1 and c2. Implies at least one transcript contributing to that EC is used differently between conditions. An EC significant at FDR < 0.05 is evidence that the gene shows DTU.
+
+- **"Usage"**
+
+Normalized log counts, e.g., of ECs. Higher usage = more reads supporting transcripts in that EC and vice versa
+
 - **Differential Transcript Usage (DTU)**
 
 Changes in how a gene’s transcripts are proportionally used between conditions. DTU reflects shifts in isoform composition rather than total gene expression.
