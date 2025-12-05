@@ -69,6 +69,6 @@ In conclusion, we were able to successfully replicate much of the work done in t
 In general, the original work was well documented and we're grateful for the precision with which they provided their methods and code. Although we encountered difficulties with outdated dependencies, by and large the process was smooth and well described by the orginal authors.
 
 # 6.0 References
-[1] M. Cmero, N. M. Davidson, and A. Oshlack, “Using equivalence class counts for fast and accurate testing of differential transcript usage,” F1000Research, vol. 8, p. 265, Apr. 2019. doi:10.12688/f1000research.18276.2 
-[2] M. Cmero, “ec-dtu-paper,” Oshlack/ec-dtu-paper, https://github.com/Oshlack/ec-dtu-paper (accessed 2025). 
-[3] M. Cmero, Vignette, https://github.com/Oshlack/ec-dtu-paper/wiki/Vignette (accessed 2025). 
+[1] M. Cmero, N. M. Davidson, and A. Oshlack, “Using equivalence class counts for fast and accurate testing of differential transcript usage,” F1000Research, vol. 8, p. 265, Apr. 2019. doi:10.12688/f1000research.18276.2  
+[2] M. Cmero, “ec-dtu-paper,” Oshlack/ec-dtu-paper, https://github.com/Oshlack/ec-dtu-paper (accessed 2025).  
+[3] M. Cmero, Vignette, https://github.com/Oshlack/ec-dtu-paper/wiki/Vignette (accessed 2025).  
